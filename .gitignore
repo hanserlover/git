@@ -1,0 +1,29 @@
+# Keil MDK build outputs
+MDK-ARM/OB_ROBOT/
+MDK-ARM/Objects/
+MDK-ARM/Listings/
+
+# Keil per-user/session files
+*.uvguix.*
+*.uvoptx
+JLinkLog.txt
+JLinkSettings.ini
+
+# Generated listings and temporary files
+*.lst
+*.bak
+*.tmp
+*.crf
+*.d
+*.o
+*.axf
+*.hex
+*.map
+*.lnp
+*.dep
+
+# Editor and operating-system noise
+.DS_Store
+Thumbs.db
+*.swp
+*~
