@@ -69,6 +69,11 @@ static void Move_Wheels(int32_t lf, int32_t rf, int32_t lr, int32_t rr)
     Move_Wheel(MOTOR_RR, rr, (uint8_t)WHEEL_INVERT_RR);
 }
 
+void Move_SetWheelSpeeds(int16_t lf, int16_t rf, int16_t lr, int16_t rr)
+{
+    Move_Wheels(lf, rf, lr, rr);
+}
+
 /* ===================== 初始化 / 停止 ===================== */
 
 void Move_Init(void)

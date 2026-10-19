@@ -637,6 +637,26 @@
               <FilePath>.\User\app.h</FilePath>
             </File>
             <File>
+              <FileName>speed_control_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\User\speed_control_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>speed_control_test.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\User\speed_control_test.h</FilePath>
+            </File>
+            <File>
+              <FileName>wheel_speed_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\User\wheel_speed_control.c</FilePath>
+            </File>
+            <File>
+              <FileName>wheel_speed_control.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\User\wheel_speed_control.h</FilePath>
+            </File>
+            <File>
               <FileName>wheel_speed.c</FileName>
               <FileType>1</FileType>
               <FilePath>.\User\wheel_speed.c</FilePath>

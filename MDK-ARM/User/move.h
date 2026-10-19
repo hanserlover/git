@@ -17,6 +17,7 @@ void Move_Init(void);
 void Move_Stop(void);
 
 /* ===================== 底盘速度（麦轮逆运动学 + 极性修正） ===================== */
+void Move_SetWheelSpeeds(int16_t lf, int16_t rf, int16_t lr, int16_t rr);
 void Move_SetVelocity(int16_t vx, int16_t vy, int16_t wz);
 
 /* ===================== 四向移动（speed 范围 0 ~ MOTOR_PWM_MAX） ===================== */

@@ -1,4 +1,5 @@
 #include "wheel_speed.h"
+#include "wheel_speed_control.h"
 
 /* 实测每厘米脉冲数 x100：LF、RF、LR、RR。 */
 static const int32_t wheel_ppc_x100[ENCODER_NUM] = {
@@ -76,5 +77,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == TIM2) {
         WheelSpeed_Update10ms();
+        WheelSpeedControl_Update10ms();
     }
 }
