@@ -104,8 +104,8 @@ void OLED_Refresh(void)
 	}
 }
 
-// 清屏函数
-void OLED_Clear(void)
+// 只清除RAM显存，不立即发送到OLED，适合整帧重绘以避免闪屏
+void OLED_ClearBuffer(void)
 {
 	u8 i,n;
 	for(i=0;i<8;i++)
@@ -115,6 +115,13 @@ void OLED_Clear(void)
 			 OLED_GRAM[n][i]=0;//清除所有数据
 		}
 	}
+
+}
+
+// 清屏函数：需要立即清黑实体屏幕时使用
+void OLED_Clear(void)
+{
+	OLED_ClearBuffer();
 	OLED_Refresh();//更新显示
 }
 

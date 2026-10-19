@@ -21,6 +21,7 @@ void OLED_WR_Byte(u8 dat,u8 mode);
 void OLED_DisPlay_On(void);
 void OLED_DisPlay_Off(void);
 void OLED_Refresh(void);
+void OLED_ClearBuffer(void);
 void OLED_Clear(void);
 void OLED_DrawPoint(u8 x,u8 y);
 void OLED_DrawLine(u8 x1,u8 y1,u8 x2,u8 y2);

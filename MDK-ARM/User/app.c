@@ -66,7 +66,8 @@ static void FeedforwardTest_Show(void)
     App_FormatSpeed(lr, App_GetDisplaySpeed(ENCODER_LR));
     App_FormatSpeed(rr, App_GetDisplaySpeed(ENCODER_RR));
 
-    OLED_Clear();
+    /* 先在RAM中完成整帧，再一次性刷新，避免“黑屏帧→内容帧”闪烁。 */
+    OLED_ClearBuffer();
     sprintf(line, "FF PWM:%u %s",
             (unsigned int)feedforward_pwm[ff_pwm_index],
             (ff_running != 0U) ? "RUN" : "READY");
