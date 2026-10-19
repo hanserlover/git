@@ -7,17 +7,29 @@
  * 单向调试串口：PA9=USART1_TX -> DAP RX，115200 8N1。
  * PA10仍由TIM1_CH3输出左前轮PWM，禁止连接DAP TX。
  */
-#define TELEMETRY_PERIOD_MS       100U
+#define TELEMETRY_PERIOD_MS       20U
 #define TELEMETRY_BUFFER_SIZE     128U
 
 static UART_HandleTypeDef debug_uart;
 static uint32_t telemetry_tick = 0U;
-static uint8_t telemetry_header_sent = 0U;
 static char telemetry_buffer[TELEMETRY_BUFFER_SIZE];
 
-static const char telemetry_header[] =
-    "ms,run,target_x10,lf_x10,rf_x10,lr_x10,rr_x10,"
-    "pwm_lf,pwm_rf,pwm_lr,pwm_rr\r\n";
+static void DebugTelemetry_FormatX10(char *text, int32_t value_x10)
+{
+    uint32_t magnitude;
+
+    if (value_x10 < 0L) {
+        magnitude = (uint32_t)(-value_x10);
+        sprintf(text, "-%lu.%lu",
+                (unsigned long)(magnitude / 10U),
+                (unsigned long)(magnitude % 10U));
+    } else {
+        magnitude = (uint32_t)value_x10;
+        sprintf(text, "%lu.%lu",
+                (unsigned long)(magnitude / 10U),
+                (unsigned long)(magnitude % 10U));
+    }
+}
 
 HAL_StatusTypeDef DebugTelemetry_Init(void)
 {
@@ -51,16 +63,18 @@ HAL_StatusTypeDef DebugTelemetry_Init(void)
     HAL_NVIC_EnableIRQ(USART1_IRQn);
 
     telemetry_tick = HAL_GetTick();
-    telemetry_header_sent = 0U;
     return HAL_OK;
 }
 
 void DebugTelemetry_Process(uint32_t now)
 {
     int32_t speed[ENCODER_NUM];
-    int16_t pwm[ENCODER_NUM];
     int32_t target_x10;
-    uint8_t running;
+    char target[16];
+    char lf[16];
+    char rf[16];
+    char lr[16];
+    char rr[16];
     uint32_t primask;
     uint8_t i;
     int length;
@@ -74,41 +88,26 @@ void DebugTelemetry_Process(uint32_t now)
         return;
     }
 
-    if (telemetry_header_sent == 0U) {
-        if (HAL_UART_Transmit_IT(&debug_uart,
-                (uint8_t *)telemetry_header,
-                (uint16_t)(sizeof(telemetry_header) - 1U)) == HAL_OK) {
-            telemetry_header_sent = 1U;
-        }
-        return;
-    }
-
     /* 只在极短临界区内复制中断更新的数据，格式化和发送均在主循环。 */
     primask = __get_PRIMASK();
     __disable_irq();
     for (i = 0U; i < ENCODER_NUM; i++) {
         speed[i] = g_wheel_speed_x10[i];
-        pwm[i] = g_wheel_control_pwm[i];
     }
     target_x10 = WheelSpeedControl_GetTargetX10();
-    running = WheelSpeedControl_IsRunning();
     if ((primask & 0x01U) == 0U) {
         __enable_irq();
     }
 
-    length = sprintf(telemetry_buffer,
-        "%lu,%u,%ld,%ld,%ld,%ld,%ld,%d,%d,%d,%d\r\n",
-        (unsigned long)now,
-        (unsigned int)running,
-        (long)target_x10,
-        (long)speed[ENCODER_LF],
-        (long)speed[ENCODER_RF],
-        (long)speed[ENCODER_LR],
-        (long)speed[ENCODER_RR],
-        (int)pwm[ENCODER_LF],
-        (int)pwm[ENCODER_RF],
-        (int)pwm[ENCODER_LR],
-        (int)pwm[ENCODER_RR]);
+    DebugTelemetry_FormatX10(target, target_x10);
+    DebugTelemetry_FormatX10(lf, speed[ENCODER_LF]);
+    DebugTelemetry_FormatX10(rf, speed[ENCODER_RF]);
+    DebugTelemetry_FormatX10(lr, speed[ENCODER_LR]);
+    DebugTelemetry_FormatX10(rr, speed[ENCODER_RR]);
+
+    /* VOFA+ FireWater：ch0=目标，ch1~ch4=LF、RF、LR、RR。 */
+    length = sprintf(telemetry_buffer, "%s,%s,%s,%s,%s\n",
+                     target, lf, rf, lr, rr);
 
     if ((length > 0) && ((uint32_t)length < TELEMETRY_BUFFER_SIZE)) {
         (void)HAL_UART_Transmit_IT(&debug_uart,

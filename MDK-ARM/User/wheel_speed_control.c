@@ -17,6 +17,18 @@
 #define WHEEL_FF_GAIN_X10             45L
 #define WHEEL_CONTROL_PWM_LIMIT       1500L
 
+/*
+ * 各轮目标速度偏置，单位0.1 cm/s，顺序为LF、RF、LR、RR。
+ * PPC只表示编码器距离比例；直线纠偏应在这里调整目标速度。
+ * 当前仅让RR比公共目标快0.3 cm/s，用于修正车辆向右偏。
+ */
+static const int32_t wheel_target_bias_x10[ENCODER_NUM] = {
+    0L,
+    0L,
+    0L,
+    3L
+};
+
 static volatile uint8_t wheel_control_running = 0U;
 static volatile int32_t wheel_target_speed_x10 = 0L;
 static int32_t wheel_integral[ENCODER_NUM] = {0L, 0L, 0L, 0L};
@@ -94,17 +106,18 @@ int32_t WheelSpeedControl_GetTargetX10(void)
 void WheelSpeedControl_Update10ms(void)
 {
     int32_t pwm[ENCODER_NUM];
-    int32_t feedforward;
     uint8_t i;
 
     if (wheel_control_running == 0U) {
         return;
     }
 
-    feedforward = (wheel_target_speed_x10 * WHEEL_FF_GAIN_X10) / 10L;
-
     for (i = 0U; i < ENCODER_NUM; i++) {
-        int32_t error = wheel_target_speed_x10 - g_wheel_speed_x10[i];
+        int32_t wheel_target_x10 =
+            wheel_target_speed_x10 + wheel_target_bias_x10[i];
+        int32_t feedforward =
+            (wheel_target_x10 * WHEEL_FF_GAIN_X10) / 10L;
+        int32_t error = wheel_target_x10 - g_wheel_speed_x10[i];
         int32_t output;
 
         wheel_integral[i] = WheelSpeedControl_Limit(

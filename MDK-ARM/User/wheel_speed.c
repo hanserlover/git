@@ -1,12 +1,12 @@
 #include "wheel_speed.h"
 #include "wheel_speed_control.h"
 
-/* 实测每厘米脉冲数 x100：LF、RF、LR、RR。 */
+/* 200 cm、3次闭环行驶标定得到的每厘米脉冲数 x100：LF、RF、LR、RR。 */
 static const int32_t wheel_ppc_x100[ENCODER_NUM] = {
-    7851L,
-    7905L,
-    7825L,
-    7562L
+    8297L,
+    8242L,
+    8260L,
+    8194L
 };
 
 static int32_t wheel_last_count[ENCODER_NUM] = {0, 0, 0, 0};
