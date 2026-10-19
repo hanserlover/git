@@ -10,6 +10,7 @@
 #include "wheel_speed.h"
 #include "wheel_speed_control.h"
 #include "speed_control_test.h"
+#include "debug_telemetry.h"
 
 static uint8_t app_last_key = KEY_NONE;
 static uint32_t app_tick_10ms = 0U;
@@ -24,6 +25,10 @@ void App_Init(void)
     Key_Init();
     OLED_Init();
     IMU601_Init();
+
+    if (DebugTelemetry_Init() != HAL_OK) {
+        Error_Handler();
+    }
 
     if (HAL_TIM_Base_Start_IT(&htim2) != HAL_OK) {
         Error_Handler();
@@ -52,4 +57,5 @@ void App_Run(void)
     }
 
     SpeedControlTest_Process(now);
+    DebugTelemetry_Process(now);
 }

@@ -10,6 +10,7 @@ void WheelSpeedControl_Init(void);
 void WheelSpeedControl_Start(int32_t target_speed_x10);
 void WheelSpeedControl_Stop(void);
 uint8_t WheelSpeedControl_IsRunning(void);
+int32_t WheelSpeedControl_GetTargetX10(void);
 void WheelSpeedControl_Update10ms(void);
 
 #endif

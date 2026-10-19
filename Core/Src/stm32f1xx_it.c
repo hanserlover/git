@@ -22,6 +22,7 @@
 #include "stm32f1xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "debug_telemetry.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -270,6 +271,11 @@ void USART3_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
+
+void USART1_IRQHandler(void)
+{
+  DebugTelemetry_IRQHandler();
+}
 
 /**
   * @brief  //新增  TIM2 全局中断 —— 5ms 业务节拍源

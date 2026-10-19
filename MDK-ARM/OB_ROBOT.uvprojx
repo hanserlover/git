@@ -637,6 +637,16 @@
               <FilePath>.\User\app.h</FilePath>
             </File>
             <File>
+              <FileName>debug_telemetry.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\User\debug_telemetry.c</FilePath>
+            </File>
+            <File>
+              <FileName>debug_telemetry.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\User\debug_telemetry.h</FilePath>
+            </File>
+            <File>
               <FileName>speed_control_test.c</FileName>
               <FileType>1</FileType>
               <FilePath>.\User\speed_control_test.c</FilePath>

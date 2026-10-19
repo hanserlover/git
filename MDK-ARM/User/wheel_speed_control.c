@@ -86,6 +86,11 @@ uint8_t WheelSpeedControl_IsRunning(void)
     return wheel_control_running;
 }
 
+int32_t WheelSpeedControl_GetTargetX10(void)
+{
+    return wheel_target_speed_x10;
+}
+
 void WheelSpeedControl_Update10ms(void)
 {
     int32_t pwm[ENCODER_NUM];
