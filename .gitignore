@@ -23,6 +23,7 @@ JLinkSettings.ini
 *.dep
 
 # Editor and operating-system noise
+MDK-ARM/.vscode/
 .DS_Store
 Thumbs.db
 *.swp
