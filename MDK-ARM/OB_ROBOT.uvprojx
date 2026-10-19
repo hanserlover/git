@@ -627,6 +627,16 @@
           <GroupName>User</GroupName>
           <Files>
             <File>
+              <FileName>wheel_speed.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\User\wheel_speed.c</FilePath>
+            </File>
+            <File>
+              <FileName>wheel_speed.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\User\wheel_speed.h</FilePath>
+            </File>
+            <File>
               <FileName>encoder.c</FileName>
               <FileType>1</FileType>
               <FilePath>.\User\encoder.c</FilePath>

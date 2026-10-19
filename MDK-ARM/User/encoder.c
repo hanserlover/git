@@ -72,6 +72,19 @@ int32_t Encoder_GetCount(Encoder_ID id)
     }
 }
 
+int32_t Encoder_GetPhysicalCount(Encoder_ID id)
+{
+    int32_t raw = Encoder_GetCount(id);
+
+    switch (id) {
+        case ENCODER_LF: return raw * ENCODER_SIGN_LF;
+        case ENCODER_RF: return raw * ENCODER_SIGN_RF;
+        case ENCODER_LR: return raw * ENCODER_SIGN_LR;
+        case ENCODER_RR: return raw * ENCODER_SIGN_RR;
+        default:         return 0;
+    }
+}
+
 void Encoder_Clear(Encoder_ID id)
 {
     switch (id) {

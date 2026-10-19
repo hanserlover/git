@@ -17,6 +17,7 @@
 #include "oled.h"
 #include "imu601.h"
 #include "move.h"
+#include "wheel_speed.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -26,9 +27,9 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define DEFAULT_SPEED 1200 
-#define ENCODER_DIR_TEST_BUILD 1U
-#define ENCODER_DIR_TEST_PWM 500
-#define ENCODER_DIR_TEST_TIMEOUT_MS 5000U
+#define WHEEL_SPEED_TEST_BUILD 1U
+#define WHEEL_SPEED_TEST_PWM 500
+#define WHEEL_SPEED_TEST_TIMEOUT_MS 5000U
 #define ONE_METER_RUN_BUILD 0U
 #define ONE_METER_SPEED 900
 #define ONE_METER_TIMEOUT_MS 15000U
@@ -55,7 +56,7 @@ uint8_t work_mode = 0;
 volatile uint8_t g_one_meter_state = 0;
 volatile int32_t g_one_meter_counts[ENCODER_NUM] = {0, 0, 0, 0};
 
-/* 编码器方向测试：顺序固定为 LF、RF、LR、RR，保留有符号计数。 */
+/* 轮速采样测试：顺序固定为 LF、RF、LR、RR。 */
 volatile uint8_t g_encoder_dir_test_state = 0;
 volatile int32_t g_encoder_dir_counts[ENCODER_NUM] = {0, 0, 0, 0};
 /* USER CODE END PV */
@@ -92,36 +93,58 @@ static void CenterButton_WaitRelease(void)
   HAL_Delay(25);
 }
 
-#if ENCODER_DIR_TEST_BUILD
+#if WHEEL_SPEED_TEST_BUILD
 static void EncoderDirTest_ReadCounts(void)
 {
-  g_encoder_dir_counts[ENCODER_LF] = Encoder_GetCount(ENCODER_LF);
-  g_encoder_dir_counts[ENCODER_RF] = Encoder_GetCount(ENCODER_RF);
-  g_encoder_dir_counts[ENCODER_LR] = Encoder_GetCount(ENCODER_LR);
-  g_encoder_dir_counts[ENCODER_RR] = Encoder_GetCount(ENCODER_RR);
+  g_encoder_dir_counts[ENCODER_LF] = Encoder_GetPhysicalCount(ENCODER_LF);
+  g_encoder_dir_counts[ENCODER_RF] = Encoder_GetPhysicalCount(ENCODER_RF);
+  g_encoder_dir_counts[ENCODER_LR] = Encoder_GetPhysicalCount(ENCODER_LR);
+  g_encoder_dir_counts[ENCODER_RR] = Encoder_GetPhysicalCount(ENCODER_RR);
+}
+
+static void WheelSpeed_Format(char *text, int32_t speed_x10)
+{
+  uint32_t magnitude;
+  char sign;
+
+  if (speed_x10 < 0) {
+    sign = '-';
+    magnitude = (uint32_t)(-speed_x10);
+  } else {
+    sign = '+';
+    magnitude = (uint32_t)speed_x10;
+  }
+  sprintf(text, "%c%lu.%lu", sign,
+          (unsigned long)(magnitude / 10U),
+          (unsigned long)(magnitude % 10U));
 }
 
 static void EncoderDirTest_Show(void)
 {
   char line[24];
+  char lf[10];
+  char rf[10];
+  char lr[10];
+  char rr[10];
+
+  WheelSpeed_Format(lf, g_wheel_speed_x10[ENCODER_LF]);
+  WheelSpeed_Format(rf, g_wheel_speed_x10[ENCODER_RF]);
+  WheelSpeed_Format(lr, g_wheel_speed_x10[ENCODER_LR]);
+  WheelSpeed_Format(rr, g_wheel_speed_x10[ENCODER_RR]);
 
   OLED_Clear();
   if (g_encoder_dir_test_state == 1U) {
-    OLED_ShowString(0, 0, "ENC DIR: RUN FWD", OLED_TEXT_SIZE);
+    OLED_ShowString(0, 0, "SPEED cm/s RUN", OLED_TEXT_SIZE);
   } else if (g_encoder_dir_test_state == 2U) {
-    OLED_ShowString(0, 0, "ENC DIR: STOPPED", OLED_TEXT_SIZE);
+    OLED_ShowString(0, 0, "SPEED TEST STOP", OLED_TEXT_SIZE);
   } else {
-    OLED_ShowString(0, 0, "ENC DIR TEST", OLED_TEXT_SIZE);
+    OLED_ShowString(0, 0, "SPEED TEST PWM500", OLED_TEXT_SIZE);
   }
 
-  sprintf(line, "LF:%+ld RF:%+ld",
-          (long)g_encoder_dir_counts[ENCODER_LF],
-          (long)g_encoder_dir_counts[ENCODER_RF]);
+  sprintf(line, "LF:%s RF:%s", lf, rf);
   OLED_ShowString(0, 16, line, OLED_TEXT_SIZE);
 
-  sprintf(line, "LR:%+ld RR:%+ld",
-          (long)g_encoder_dir_counts[ENCODER_LR],
-          (long)g_encoder_dir_counts[ENCODER_RR]);
+  sprintf(line, "LR:%s RR:%s", lr, rr);
   OLED_ShowString(0, 32, line, OLED_TEXT_SIZE);
 
   if (g_encoder_dir_test_state == 1U) {
@@ -138,9 +161,10 @@ static void EncoderDirTest_RunOnce(void)
   uint32_t last_refresh;
 
   Encoder_ClearAll();
+  WheelSpeed_Reset();
   EncoderDirTest_ReadCounts();
   g_encoder_dir_test_state = 1U;
-  Move_Forward(ENCODER_DIR_TEST_PWM);
+  Move_Forward(WHEEL_SPEED_TEST_PWM);
   start_tick = HAL_GetTick();
   last_refresh = start_tick;
   EncoderDirTest_Show();
@@ -157,7 +181,7 @@ static void EncoderDirTest_RunOnce(void)
       return;
     }
 
-    if ((HAL_GetTick() - start_tick) >= ENCODER_DIR_TEST_TIMEOUT_MS) {
+    if ((HAL_GetTick() - start_tick) >= WHEEL_SPEED_TEST_TIMEOUT_MS) {
       Move_Stop();
       EncoderDirTest_ReadCounts();
       g_encoder_dir_test_state = 2U;
@@ -377,12 +401,17 @@ int main(void)
   /* USER CODE BEGIN 2 */
   Motor_Init();
   Encoder_Init();
+  WheelSpeed_Init();
   Sensor_Init();
   Key_Init();
   OLED_Init();
   IMU601_Init();
 
-#if ENCODER_DIR_TEST_BUILD
+  if (HAL_TIM_Base_Start_IT(&htim2) != HAL_OK) {
+    Error_Handler();
+  }
+
+#if WHEEL_SPEED_TEST_BUILD
   EncoderDirTest_ModeRun();
 #elif ONE_METER_RUN_BUILD
   OneMeter_ModeRun();
@@ -525,6 +554,12 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  if (htim->Instance == TIM2) {
+    WheelSpeed_Update10ms();
+  }
+}
 /* USER CODE END 4 */
 
 /**

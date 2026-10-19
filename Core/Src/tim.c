@@ -120,17 +120,16 @@ void MX_TIM2_Init(void)
   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
   /* USER CODE BEGIN TIM2_Init 1 */
-  /* ==== //修改  本工程业务需要 5ms 控制周期中断 ====
+  /* ==== 轮速采样与控制使用 10ms 固定周期中断 ====
    * TIM2 挂在 APB1，APB1 分频 = HCLK/2 = 36MHz，但 APB1 预分频不为 1 时
    * 定时器时钟自动 x2，故 TIM2 计数时钟 = 72MHz。
    *   计数频率 = 72MHz / (Prescaler+1) = 72MHz / 72 = 1MHz（即 1 计数 = 1us）
-   *   中断周期 = (Period+1) * 1us    = 5000 * 1us  = 5ms
-   * 原值 Prescaler=0 / Period=3599 对应 50us，与业务需求不符，此处修改。 */
+   *   中断周期 = (Period+1) * 1us    = 10000 * 1us = 10ms。 */
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 0;
+  htim2.Init.Prescaler = 71;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 3599;
+  htim2.Init.Period = 9999;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -149,9 +148,8 @@ void MX_TIM2_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN TIM2_Init 2 */
-  /* //新增  使能 TIM2 更新中断（5ms 业务心跳），优先级设为最低 15，
-   *        确保不抢占 EXTI 编码器中断(优先级 0)，防止编码器丢脉冲。 */
-  HAL_NVIC_SetPriority(TIM2_IRQn, 15, 0);
+  /* EXTI编码器保持优先级0，TIM2轮速采样使用优先级1。 */
+  HAL_NVIC_SetPriority(TIM2_IRQn, 1, 0);
   HAL_NVIC_EnableIRQ(TIM2_IRQn);
   /* USER CODE END TIM2_Init 2 */
 

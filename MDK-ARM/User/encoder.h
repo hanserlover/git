@@ -7,6 +7,12 @@
 #define ENCODER_LF_TIM     (&htim4)   /* 左前 PB6/PB7 */
 #define ENCODER_RF_TIM     (&htim8)   /* 右前 PC6/PC7 */
 
+/* 实测方向修正：统一规定车轮物理前进时编码器计数为正。 */
+#define ENCODER_SIGN_LF    (-1L)
+#define ENCODER_SIGN_RF    ( 1L)
+#define ENCODER_SIGN_LR    ( 1L)
+#define ENCODER_SIGN_RR    (-1L)
+
 /* 软件编码器引脚 (EXTI双边沿) */
 #define ENC_SW_LR_A_PORT   GPIOB      /* 左后 A */
 #define ENC_SW_LR_A_PIN    GPIO_PIN_8
@@ -28,6 +34,7 @@ typedef enum {
 
 void    Encoder_Init(void);
 int32_t Encoder_GetCount(Encoder_ID id);
+int32_t Encoder_GetPhysicalCount(Encoder_ID id);
 void    Encoder_Clear(Encoder_ID id);
 
 int32_t Encoder_GetAvgCount(void);        
