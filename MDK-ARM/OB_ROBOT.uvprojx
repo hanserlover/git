@@ -627,6 +627,16 @@
           <GroupName>User</GroupName>
           <Files>
             <File>
+              <FileName>app.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\User\app.c</FilePath>
+            </File>
+            <File>
+              <FileName>app.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\User\app.h</FilePath>
+            </File>
+            <File>
               <FileName>wheel_speed.c</FileName>
               <FileType>1</FileType>
               <FilePath>.\User\wheel_speed.c</FilePath>

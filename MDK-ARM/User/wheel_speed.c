@@ -71,3 +71,10 @@ void WheelSpeed_Update10ms(void)
     }
     g_wheel_speed_sample_count++;
 }
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    if (htim->Instance == TIM2) {
+        WheelSpeed_Update10ms();
+    }
+}
