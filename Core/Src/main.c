@@ -26,7 +26,10 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define DEFAULT_SPEED 1200 
-#define ONE_METER_RUN_BUILD 1U
+#define ENCODER_DIR_TEST_BUILD 1U
+#define ENCODER_DIR_TEST_PWM 500
+#define ENCODER_DIR_TEST_TIMEOUT_MS 5000U
+#define ONE_METER_RUN_BUILD 0U
 #define ONE_METER_SPEED 900
 #define ONE_METER_TIMEOUT_MS 15000U
 #define ONE_METER_TARGET_LF 7851L
@@ -51,6 +54,10 @@ uint8_t work_mode = 0;
 /* 一米运行状态和最终计数，保留为全局变量便于调试器回读。 */
 volatile uint8_t g_one_meter_state = 0;
 volatile int32_t g_one_meter_counts[ENCODER_NUM] = {0, 0, 0, 0};
+
+/* 编码器方向测试：顺序固定为 LF、RF、LR、RR，保留有符号计数。 */
+volatile uint8_t g_encoder_dir_test_state = 0;
+volatile int32_t g_encoder_dir_counts[ENCODER_NUM] = {0, 0, 0, 0};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -60,10 +67,12 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+#if ONE_METER_RUN_BUILD
 static int32_t OneMeter_Abs32(int32_t value)
 {
   return (value < 0) ? -value : value;
 }
+#endif
 
 static uint8_t CenterButton_Pressed(void)
 {
@@ -83,6 +92,107 @@ static void CenterButton_WaitRelease(void)
   HAL_Delay(25);
 }
 
+#if ENCODER_DIR_TEST_BUILD
+static void EncoderDirTest_ReadCounts(void)
+{
+  g_encoder_dir_counts[ENCODER_LF] = Encoder_GetCount(ENCODER_LF);
+  g_encoder_dir_counts[ENCODER_RF] = Encoder_GetCount(ENCODER_RF);
+  g_encoder_dir_counts[ENCODER_LR] = Encoder_GetCount(ENCODER_LR);
+  g_encoder_dir_counts[ENCODER_RR] = Encoder_GetCount(ENCODER_RR);
+}
+
+static void EncoderDirTest_Show(void)
+{
+  char line[24];
+
+  OLED_Clear();
+  if (g_encoder_dir_test_state == 1U) {
+    OLED_ShowString(0, 0, "ENC DIR: RUN FWD", OLED_TEXT_SIZE);
+  } else if (g_encoder_dir_test_state == 2U) {
+    OLED_ShowString(0, 0, "ENC DIR: STOPPED", OLED_TEXT_SIZE);
+  } else {
+    OLED_ShowString(0, 0, "ENC DIR TEST", OLED_TEXT_SIZE);
+  }
+
+  sprintf(line, "LF:%+ld RF:%+ld",
+          (long)g_encoder_dir_counts[ENCODER_LF],
+          (long)g_encoder_dir_counts[ENCODER_RF]);
+  OLED_ShowString(0, 16, line, OLED_TEXT_SIZE);
+
+  sprintf(line, "LR:%+ld RR:%+ld",
+          (long)g_encoder_dir_counts[ENCODER_LR],
+          (long)g_encoder_dir_counts[ENCODER_RR]);
+  OLED_ShowString(0, 32, line, OLED_TEXT_SIZE);
+
+  if (g_encoder_dir_test_state == 1U) {
+    OLED_ShowString(0, 48, "CENTER=STOP", OLED_TEXT_SIZE);
+  } else {
+    OLED_ShowString(0, 48, "CENTER=START", OLED_TEXT_SIZE);
+  }
+  OLED_Refresh();
+}
+
+static void EncoderDirTest_RunOnce(void)
+{
+  uint32_t start_tick;
+  uint32_t last_refresh;
+
+  Encoder_ClearAll();
+  EncoderDirTest_ReadCounts();
+  g_encoder_dir_test_state = 1U;
+  Move_Forward(ENCODER_DIR_TEST_PWM);
+  start_tick = HAL_GetTick();
+  last_refresh = start_tick;
+  EncoderDirTest_Show();
+
+  while (1) {
+    EncoderDirTest_ReadCounts();
+
+    if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_1) == GPIO_PIN_RESET) {
+      Move_Stop();
+      EncoderDirTest_ReadCounts();
+      g_encoder_dir_test_state = 2U;
+      EncoderDirTest_Show();
+      CenterButton_WaitRelease();
+      return;
+    }
+
+    if ((HAL_GetTick() - start_tick) >= ENCODER_DIR_TEST_TIMEOUT_MS) {
+      Move_Stop();
+      EncoderDirTest_ReadCounts();
+      g_encoder_dir_test_state = 2U;
+      EncoderDirTest_Show();
+      return;
+    }
+
+    if ((HAL_GetTick() - last_refresh) >= 100U) {
+      last_refresh = HAL_GetTick();
+      EncoderDirTest_Show();
+    }
+    HAL_Delay(2);
+  }
+}
+
+static void EncoderDirTest_ModeRun(void)
+{
+  Move_Stop();
+  Encoder_ClearAll();
+  EncoderDirTest_ReadCounts();
+  g_encoder_dir_test_state = 0U;
+  EncoderDirTest_Show();
+  CenterButton_WaitRelease();
+
+  while (1) {
+    while (!CenterButton_Pressed()) {
+      HAL_Delay(10);
+    }
+    CenterButton_WaitRelease();
+    EncoderDirTest_RunOnce();
+  }
+}
+#endif
+
+#if ONE_METER_RUN_BUILD
 static void OneMeter_ReadCounts(void)
 {
   g_one_meter_counts[ENCODER_LF] = OneMeter_Abs32(Encoder_GetCount(ENCODER_LF));
@@ -228,6 +338,7 @@ static void OneMeter_ModeRun(void)
     CenterButton_WaitRelease();
   }
 }
+#endif
 /* USER CODE END 0 */
 
 /**
@@ -271,7 +382,9 @@ int main(void)
   OLED_Init();
   IMU601_Init();
 
-#if ONE_METER_RUN_BUILD
+#if ENCODER_DIR_TEST_BUILD
+  EncoderDirTest_ModeRun();
+#elif ONE_METER_RUN_BUILD
   OneMeter_ModeRun();
 #endif
 
