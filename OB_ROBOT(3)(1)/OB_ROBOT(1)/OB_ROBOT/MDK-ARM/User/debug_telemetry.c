@@ -78,7 +78,8 @@ static uint8_t DebugTelemetry_Checksum(const uint8_t *frame, uint8_t len)
 
 /* 打一行 "[ms] tag L=n AA 55 .."；上一行没发完就丢掉这一帧 */
 static void DebugTelemetry_SendFrameLine(uint32_t now, const char *tag,
-                                         const uint8_t *frame, uint8_t len)
+                                         const uint8_t *frame, uint8_t len,
+                                         uint8_t has_guess, int32_t guess)
 {
     static char line[SNIFF_BUFFER_SIZE];
     static const char hex_digit[] = "0123456789ABCDEF";
@@ -95,6 +96,11 @@ static void DebugTelemetry_SendFrameLine(uint32_t now, const char *tag,
         line[length++] = ' ';
         line[length++] = hex_digit[(frame[i] >> 4) & 0x0FU];
         line[length++] = hex_digit[frame[i] & 0x0FU];
+    }
+    /* 猜测解码：按 "AA 55 60 01 06 + roll/pitch/yaw(各2字节小端)" 试算 yaw。
+     * 这是猜的，所以标记成 gY，用来看"数值会不会随转动单调变化" */
+    if ((has_guess != 0U) && ((length + 12) < (int)SNIFF_BUFFER_SIZE)) {
+        length += sprintf(&line[length], " gY:%ld", (long)guess);
     }
     line[length++] = '\r';
     line[length++] = '\n';
@@ -159,7 +165,23 @@ static void DebugTelemetry_SniffImu(uint32_t now)
             if ((total >= 6U) && (total <= sniff_len)
                 && (DebugTelemetry_Checksum(sniff_frame, total)
                     == sniff_frame[total - 1U])) {
-                DebugTelemetry_SendFrameLine(now, "OK-A", sniff_frame, total);
+                uint8_t has_guess = 0U;
+                int32_t guess = 0L;
+
+                /*
+                 * 猜测上报帧：AA 55 60 01 06 | roll(2) pitch(2) yaw(2) | 校验
+                 * 依据是 imu601.h 里留下的注释 "AA 55 ... 0x60 0x01 0x06 帧"。
+                 * 猜错了也不要紧，看 gY 会不会随转动单调变化即可判断。
+                 */
+                if ((total == 12U) && (sniff_frame[2] == 0x60U)
+                    && (sniff_frame[3] == 0x01U) && (sniff_frame[4] == 0x06U)) {
+                    guess = (int32_t)(int16_t)(((uint16_t)sniff_frame[10] << 8)
+                                             | (uint16_t)sniff_frame[9]);
+                    has_guess = 1U;
+                }
+
+                DebugTelemetry_SendFrameLine(now, "OK-A", sniff_frame, total,
+                                             has_guess, guess);
                 sniff_len = 0U;
                 sniff_idle_ticks = 0U;
                 continue;
@@ -179,7 +201,8 @@ static void DebugTelemetry_SniffImu(uint32_t now)
                 }
             }
             if (found != 0U) {
-                DebugTelemetry_SendFrameLine(now, "OK-B", sniff_frame, found);
+                DebugTelemetry_SendFrameLine(now, "OK-B", sniff_frame, found,
+                                             0U, 0L);
                 sniff_len = 0U;
                 sniff_idle_ticks = 0U;
                 continue;
@@ -188,7 +211,7 @@ static void DebugTelemetry_SniffImu(uint32_t now)
 
         if (sniff_len >= SNIFF_FRAME_MAX) {
             DebugTelemetry_SendFrameLine(now, "RAW?", sniff_frame,
-                                         (uint8_t)SNIFF_FRAME_MAX);
+                                         (uint8_t)SNIFF_FRAME_MAX, 0U, 0L);
             sniff_len = 0U;
             sniff_idle_ticks = 0U;
         }
@@ -198,7 +221,8 @@ static void DebugTelemetry_SniffImu(uint32_t now)
     if ((sniff_len == 0U) && (sniff_idle_ticks >= SNIFF_RAW_TICKS)) {
         sniff_idle_ticks = 0U;
         DebugTelemetry_SendFrameLine(now, "RAWD", raw,
-                                     (uint8_t)((count > 12U) ? 12U : count));
+                                     (uint8_t)((count > 12U) ? 12U : count),
+                                     0U, 0L);
     }
 }
 #endif /* DEBUG_IMU_SNIFFER */
