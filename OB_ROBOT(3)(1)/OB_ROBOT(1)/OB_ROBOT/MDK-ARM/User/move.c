@@ -380,8 +380,12 @@ void Move_DriveDistance(int32_t vx_x10, int32_t distance_x100)
     if (speed < 0L) {
         speed = -speed;
     }
-    /* 预计耗时(ms) = 10 * 距离(0.01cm) / 速度(0.1cm/s) */
-    safety_ms = (uint32_t)((10L * distance_x100) / speed) * 3U + 1000U;
+    /*
+     * 预计耗时(ms) = 100 * 距离(0.01cm) / 速度(0.1cm/s)
+     *   例：1m=10000、10cm/s=100  ->  100*10000/100 = 10000ms = 10s
+     * 安全超时给 3 倍再加 1s，卡住时最多转这么久就自动停。
+     */
+    safety_ms = ((uint32_t)((100L * distance_x100) / speed) * 3U) + 1000U;
     if (safety_ms > 60000U) {
         safety_ms = 60000U;
     }
