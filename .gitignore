@@ -1,27 +1,64 @@
-# 操作系统
+# ============================================================
+#  OB_ROBOT 工作区忽略规则
+#  真正入版本控制的只有固件源码、CubeMX/Keil 工程配置与文档。
+# ============================================================
+
+# ---------- 操作系统 / 编辑器 ----------
+.DS_Store
 Thumbs.db
 Desktop.ini
-.DS_Store
-
-# 编辑器 / IDE
 .vscode/
 .idea/
 *.swp
 *~
 
-# 日志与临时文件
-*.log
-*.tmp
-tmp/
-
-# 环境变量与密钥
+# ---------- 环境变量与密钥 ----------
 .env
 .env.*
 !.env.example
 
-# 依赖与构建产物
-node_modules/
-dist/
+# ---------- 压缩包 / 本地备份 ----------
+# OB_ROBOT(3)(1).zip 这类原始压缩包只是转存介质，不入库
+*.zip
+*.7z
+*.rar
+.history_backup/
+
+# ---------- Keil MDK 构建产物 ----------
+# 编译输出目录（.o/.d/.axf/.hex/.map 都在这里）
+**/MDK-ARM/OB_ROBOT/
+**/MDK-ARM/Objects/
+**/MDK-ARM/Listings/
+
+# Keil 自动生成 / 每台机器一份的配置
+**/*.uvguix.*
+**/*.uvoptx
+**/*.lst
+**/*.dep
+**/*.lnp
+**/JLinkLog.txt
+**/JLinkSettings.ini
+
+# 编译中间文件
+*.o
+*.d
+*.crf
+*.axf
+*.hex
+*.bin
+*.map
+*.iex
+*.scvd
+
+# 手工备份（Core/*/Backup/ 下的 *.bak）
+*.bak
+*.tmp
+
+# ---------- 日志与临时目录 ----------
+*.log
+tmp/
 build/
+dist/
 __pycache__/
 *.py[cod]
+node_modules/
