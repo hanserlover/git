@@ -125,6 +125,11 @@ static volatile int32_t move_straight_base_x100 = 0L;
 #endif
 static volatile int32_t move_straight_offset_x100 = 0L;
 
+/* 距离闭环：目标距离、起点行程、已经走过的行程（都是 0.01cm） */
+static volatile int32_t move_distance_target_x100 = 0L;
+static volatile int32_t move_distance_base_x100 = 0L;
+static volatile int32_t move_travel_x100 = 0L;
+
 /* 前置声明：Move_Stop()/Move_Halt() 里要重置纠偏基准，实现在下面的纠偏小节 */
 static void Move_StraightResetBase(void);
 
@@ -143,6 +148,9 @@ void Move_Init(void)
     move_duration_ticks = 0U;
     move_elapsed_ticks = 0U;
     move_settle_ticks = 0U;
+    move_distance_target_x100 = 0L;
+    move_travel_x100 = 0L;
+    Move_StraightResetBase();
 }
 
 /* 立即断 PWM：先关掉速度闭环，再停电机，避免下一个控制周期被旧目标重新驱动 */
@@ -161,11 +169,10 @@ void Move_Stop(void)
     move_duration_ticks = 0U;
     move_elapsed_ticks = 0U;
     move_settle_ticks = 0U;
+    move_distance_target_x100 = 0L;
 
     /* 闭环也必须一起停：中断已被关掉，Abort 内部的 primask 恢复不会再开中断 */
     WheelSpeedControl_Abort();
-
-    Move_StraightResetBase();
 
     Motor_SetSpeed(MOTOR_LF, 0);
     Motor_SetSpeed(MOTOR_RF, 0);
@@ -187,6 +194,7 @@ void Move_Halt(void)
     move_tgt_x10[2] = 0L;
     move_duration_ticks = 0U;
     move_elapsed_ticks = 0U;
+    move_distance_target_x100 = 0L;   /* 手动停车：取消距离闭环，保留已走行程 */
     if ((primask & 0x01U) == 0U) {
         __enable_irq();
     }
@@ -195,7 +203,6 @@ void Move_Halt(void)
     if (move_running == 0U) {
         Move_Stop();
     }
-    Move_StraightResetBase();
 }
 
 /* ===================== 底盘速度解算 ===================== */
@@ -313,6 +320,9 @@ static void Move_StartCommand(int32_t vx_x10, int32_t vy_x10, int32_t wz_x10,
     move_tgt_x10[2] = wz_x10;
     move_elapsed_ticks = 0U;
     move_settle_ticks = 0U;
+    move_distance_target_x100 = 0L;      /* 普通指令不带距离闭环 */
+    move_distance_base_x100 = WheelSpeed_GetAverageDistanceX100();
+    move_travel_x100 = 0L;
     Move_StraightResetBase();      /* 新指令：左右行程差从当前点重新算 */
     move_duration_ticks = 0U;
     if (duration_ms != 0U) {
@@ -345,6 +355,52 @@ void Move_DriveFor(int32_t vx_x10, int32_t vy_x10, int32_t wz_x10,
                    uint32_t duration_ms)
 {
     Move_StartCommand(vx_x10, vy_x10, wz_x10, duration_ms);
+}
+
+/**
+ * @brief  距离闭环：走满 distance_x100（0.01cm）后自动减速停车
+ * @note   距离按四轮累计行程的平均值算，并在停车判据里预扣掉
+ *         "从当前速度减到 0 还要滑行的距离"，所以 1m 就是 1m，
+ *         不会冲到 1m 才开始减速。
+ *         安全超时取预计耗时的 3 倍再加 1s（上限 60s），
+ *         轮子被卡住时不会无限转下去。
+ */
+void Move_DriveDistance(int32_t vx_x10, int32_t distance_x100)
+{
+    int32_t speed = Move_ClampSpeed(vx_x10);
+    uint32_t safety_ms;
+    uint32_t primask;
+
+    if ((speed == 0L) || (distance_x100 <= 0L)) {
+        /* 参数不合法就退化成普通速度指令，至少不会原地不动 */
+        Move_StartCommand(vx_x10, 0L, 0L, 0U);
+        return;
+    }
+
+    if (speed < 0L) {
+        speed = -speed;
+    }
+    /* 预计耗时(ms) = 10 * 距离(0.01cm) / 速度(0.1cm/s) */
+    safety_ms = (uint32_t)((10L * distance_x100) / speed) * 3U + 1000U;
+    if (safety_ms > 60000U) {
+        safety_ms = 60000U;
+    }
+
+    Move_StartCommand(vx_x10, 0L, 0L, safety_ms);
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+    move_distance_base_x100 = WheelSpeed_GetAverageDistanceX100();
+    move_distance_target_x100 = distance_x100;
+    move_travel_x100 = 0L;
+    if ((primask & 0x01U) == 0U) {
+        __enable_irq();
+    }
+}
+
+int32_t Move_GetTravelX100(void)
+{
+    return move_travel_x100;
 }
 
 /* ===================== 四向移动 ===================== */
@@ -450,8 +506,29 @@ void Move_Update10ms(void)
     move_cmd_x10[1] = vy;
     move_cmd_x10[2] = wz;
 
+    /* ---------- 2) 距离闭环：接近目标距离就收油，剩余路程交给斜坡 ---------- */
+    if (move_distance_target_x100 > 0L) {
+        int32_t traveled = WheelSpeed_GetAverageDistanceX100()
+                         - move_distance_base_x100;
+        int32_t lead;
+
+        if (traveled < 0L) {
+            traveled = -traveled;       /* 后退时行程为负，取绝对值 */
+        }
+        move_travel_x100 = traveled;
+
+        /* 从当前速度减到 0 大约还要走 v^2/(2a)，换算成 0.01cm */
+        lead = (vx * vx) / (2L * MOVE_ACCEL_X10_PER_TICK * 10L);
+        if (traveled >= (move_distance_target_x100 - lead)) {
+            move_distance_target_x100 = 0L;
+            move_tgt_x10[0] = 0L;
+            move_tgt_x10[1] = 0L;
+            move_tgt_x10[2] = 0L;
+        }
+    }
+
     /*
-     * ---------- 2) 直线行程纠偏 ----------
+     * ---------- 3) 直线行程纠偏 ----------
      * 只在纯前进/后退时叠加旋转修正：横移时左右行程本来就不相等，
      * 车太慢时也不修（0 附近没有意义，反而容易抖）。
      */
@@ -463,14 +540,13 @@ void Move_Update10ms(void)
         move_straight_offset_x100 =
             Move_SideDistanceDiff() - move_straight_base_x100;
         wz_out = wz + Move_StraightCorrection();
-    } else {
-        move_straight_offset_x100 = 0L;
     }
+    /* 横移/旋转/低速段不修正，但保留上一次的偏差值，方便停下来回看 */
 #endif
 
     Move_Mix(vx, vy, wz_out, wheel);
 
-    /* ---------- 3) 停稳判定：四轮目标都为 0 后继续闭环刹车，停住再关 ---------- */
+    /* ---------- 4) 停稳判定：四轮目标都为 0 后继续闭环刹车，停住再关 ---------- */
     stopped = ((wheel[ENCODER_LF] == 0L) && (wheel[ENCODER_RF] == 0L)
             && (wheel[ENCODER_LR] == 0L) && (wheel[ENCODER_RR] == 0L)) ? 1U : 0U;
 
@@ -505,7 +581,7 @@ void Move_Update10ms(void)
                                      wheel[ENCODER_LR], wheel[ENCODER_RR]);
     }
 
-    /* ---------- 4) 定时运动到期：本周期已按目标跑过，下周期起减速 ---------- */
+    /* ---------- 5) 定时运动到期：本周期已按目标跑过，下周期起减速 ---------- */
     if (move_duration_ticks != 0U) {
         move_elapsed_ticks++;
         if (move_elapsed_ticks >= move_duration_ticks) {

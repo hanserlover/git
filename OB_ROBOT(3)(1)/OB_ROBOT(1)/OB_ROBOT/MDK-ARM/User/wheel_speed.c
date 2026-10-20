@@ -83,6 +83,22 @@ void WheelSpeed_Update10ms(void)
     g_wheel_speed_sample_count++;
 }
 
+/**
+ * @brief  四轮累计行程的平均值（0.01cm，前进为正）
+ * @note   距离闭环按"整车走了多远"判断，所以取四轮平均；
+ *         左右两侧谁走得多由 move.c 的行程纠偏单独处理。
+ */
+int32_t WheelSpeed_GetAverageDistanceX100(void)
+{
+    int32_t sum = 0L;
+    uint8_t i;
+
+    for (i = 0U; i < ENCODER_NUM; i++) {
+        sum += g_wheel_distance_x100[i];
+    }
+    return sum / (int32_t)ENCODER_NUM;
+}
+
 /*
  * TIM2 10ms 中断：只做"采样 → 斜坡/目标 → 闭环"这条控制链，
  * OLED、按键、串口格式化全部留给主循环，保证中断时间可控。

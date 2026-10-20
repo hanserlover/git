@@ -46,6 +46,17 @@ void Move_Drive(int32_t vx_x10, int32_t vy_x10, int32_t wz_x10);
 void Move_DriveFor(int32_t vx_x10, int32_t vy_x10, int32_t wz_x10,
                    uint32_t duration_ms);
 
+/*
+ * 距离闭环：前进 distance_x100（单位 0.01cm，10000 = 1m）后自动减速停车。
+ * 按四轮累计行程的平均值判断，停车前会按当前速度预扣减速距离，
+ * 所以 1m 的落点在 1m 附近而不是"1m 再冲出去一段"。
+ * 同时带一个 3 倍预计耗时的安全超时，卡住不会一直转。
+ */
+void Move_DriveDistance(int32_t vx_x10, int32_t distance_x100);
+
+/* 本条距离指令已经走了多少（0.01cm），供界面显示 */
+int32_t Move_GetTravelX100(void);
+
 /* ===================== 底层 PWM 直通（供速度闭环下发结果） ===================== */
 void Move_SetWheelSpeeds(int16_t lf, int16_t rf, int16_t lr, int16_t rr);
 

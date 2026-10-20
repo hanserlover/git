@@ -27,4 +27,7 @@ void WheelSpeed_Init(void);
 void WheelSpeed_Reset(void);
 void WheelSpeed_Update10ms(void);
 
+/* 四轮累计行程的平均值（0.01cm，前进为正），给距离闭环用 */
+int32_t WheelSpeed_GetAverageDistanceX100(void);
+
 #endif
