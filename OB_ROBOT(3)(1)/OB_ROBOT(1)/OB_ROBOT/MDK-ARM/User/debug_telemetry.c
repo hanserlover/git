@@ -22,9 +22,11 @@
 
 static UART_HandleTypeDef debug_uart;
 static uint32_t telemetry_tick = 0U;
-static char telemetry_buffer[TELEMETRY_BUFFER_SIZE];
 
 #if (DEBUG_IMU_SNIFFER == 0)
+/* 嗅探模式下不发波形，这个缓冲只在正常模式用，避免"定义了没用"的告警 */
+static char telemetry_buffer[TELEMETRY_BUFFER_SIZE];
+
 static void DebugTelemetry_FormatX10(char *text, int32_t value_x10)
 {
     uint32_t magnitude;
