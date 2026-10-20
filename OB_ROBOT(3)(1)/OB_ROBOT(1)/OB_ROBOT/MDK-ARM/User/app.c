@@ -50,7 +50,10 @@ void App_Run(void)
     if ((tick - app_tick_last) >= 1U) {
         app_tick_last = tick;
         MotionTest_ProcessKey(Key_Scan());
-        IMU601_Process();
+#if (DEBUG_IMU_SNIFFER == 0)
+        IMU601_Process();   /* 正常模式：把 IMU 上报的数据读空即可 */
+#endif
+        /* 嗅探模式下不能在这里读空，原始字节由 DebugTelemetry_Process() 取走 */
     }
 
     MotionTest_ProcessTick(tick);

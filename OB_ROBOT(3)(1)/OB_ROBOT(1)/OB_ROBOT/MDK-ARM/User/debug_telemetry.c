@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "debug_telemetry.h"
+#include "imu601.h"
 #include "wheel_speed.h"
 #include "wheel_speed_control.h"
 
@@ -10,10 +11,18 @@
 #define TELEMETRY_PERIOD_MS       20U
 #define TELEMETRY_BUFFER_SIZE     128U
 
+#if (DEBUG_IMU_SNIFFER != 0)
+/* 嗅探模式：每行最多 12 字节原始数据，10ms 一行 */
+#define SNIFF_PERIOD_MS           10U
+#define SNIFF_CHUNK               12U
+#define SNIFF_BUFFER_SIZE         64U
+#endif
+
 static UART_HandleTypeDef debug_uart;
 static uint32_t telemetry_tick = 0U;
 static char telemetry_buffer[TELEMETRY_BUFFER_SIZE];
 
+#if (DEBUG_IMU_SNIFFER == 0)
 static void DebugTelemetry_FormatX10(char *text, int32_t value_x10)
 {
     uint32_t magnitude;
@@ -30,6 +39,59 @@ static void DebugTelemetry_FormatX10(char *text, int32_t value_x10)
                 (unsigned long)(magnitude % 10U));
     }
 }
+#endif /* DEBUG_IMU_SNIFFER == 0 */
+
+#if (DEBUG_IMU_SNIFFER != 0)
+/*
+ * IMU 原始字节嗅探：把 USART3 收到的字节按 hex 打到调试串口 USART1。
+ * 每行形如  [123456] AA 55 60 01 06 ...
+ *
+ * 用法：把 debug_telemetry.h 的 DEBUG_IMU_SNIFFER 改成 1 后编译烧写，
+ * 串口助手开 115200 抓文本：
+ *   1) 静止抓 20 行；
+ *   2) 手动把车原地转 90°，再抓 20 行；
+ *   对比哪些字节在变、帧头/长度/校验位置在哪，就能反推上报帧格式。
+ */
+static void DebugTelemetry_SniffImu(uint32_t now)
+{
+    static char sniff_buffer[SNIFF_BUFFER_SIZE];
+    static const char hex_digit[] = "0123456789ABCDEF";
+    uint8_t raw[SNIFF_CHUNK];
+    uint16_t count;
+    uint16_t i;
+    int length;
+
+    if ((now - telemetry_tick) < SNIFF_PERIOD_MS) {
+        return;
+    }
+    telemetry_tick = now;
+
+    /* 上一行还没发完就先不取，避免字节被劈成两行 */
+    if (HAL_UART_GetState(&debug_uart) != HAL_UART_STATE_READY) {
+        return;
+    }
+
+    count = IMU601_ReadRaw(raw, (uint16_t)SNIFF_CHUNK);
+    if (count == 0U) {
+        return;
+    }
+
+    length = sprintf(sniff_buffer, "[%lu] ", (unsigned long)now);
+    for (i = 0U; i < count; i++) {
+        if ((length + 4) >= (int)SNIFF_BUFFER_SIZE) {
+            break;
+        }
+        sniff_buffer[length++] = hex_digit[(raw[i] >> 4) & 0x0FU];
+        sniff_buffer[length++] = hex_digit[raw[i] & 0x0FU];
+        sniff_buffer[length++] = ' ';
+    }
+    sniff_buffer[length++] = '\r';
+    sniff_buffer[length++] = '\n';
+
+    (void)HAL_UART_Transmit_IT(&debug_uart, (uint8_t *)sniff_buffer,
+                               (uint16_t)length);
+}
+#endif /* DEBUG_IMU_SNIFFER */
 
 HAL_StatusTypeDef DebugTelemetry_Init(void)
 {
@@ -68,6 +130,9 @@ HAL_StatusTypeDef DebugTelemetry_Init(void)
 
 void DebugTelemetry_Process(uint32_t now)
 {
+#if (DEBUG_IMU_SNIFFER != 0)
+    DebugTelemetry_SniffImu(now);
+#else
     int32_t speed[ENCODER_NUM];
     int32_t target_x10;
     char target[16];
@@ -114,6 +179,7 @@ void DebugTelemetry_Process(uint32_t now)
                                   (uint8_t *)telemetry_buffer,
                                   (uint16_t)length);
     }
+#endif /* DEBUG_IMU_SNIFFER */
 }
 
 void DebugTelemetry_IRQHandler(void)

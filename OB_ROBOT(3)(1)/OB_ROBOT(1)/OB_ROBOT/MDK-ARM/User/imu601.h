@@ -77,4 +77,16 @@ void IMU601_Init(void);
  */
 void IMU601_Process(void);
 
+/**
+ * @brief  取出 USART3 收到的原始字节（不做任何解析）
+ * @param  buffer  输出缓冲
+ * @param  max_len 最多取多少字节
+ * @return 实际取到的字节数（0 表示当前没有数据）
+ * @note   非阻塞：有多少读多少，读 DR 同时清 RXNE/ORE。
+ *         正常业务用 IMU601_Process() 把数据读空即可；
+ *         这个接口是给"协议嗅探"用的——把原始字节转到调试串口，
+ *         抓一段 hex 出来就能反推模块的上报帧格式。
+ */
+uint16_t IMU601_ReadRaw(uint8_t *buffer, uint16_t max_len);
+
 #endif /* __IMU601_H */

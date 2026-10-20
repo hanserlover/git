@@ -180,3 +180,24 @@ void IMU601_Process(void)
         (void)dummy;
     }
 }
+
+/**
+ * @brief  取出 USART3 收到的原始字节（不解析）
+ * @note   先读 SR（RXNE 标志）再读 DR，读 DR 会同时清 RXNE 和 ORE，
+ *         所以长时间没处理导致的溢出也能自愈。
+ */
+uint16_t IMU601_ReadRaw(uint8_t *buffer, uint16_t max_len)
+{
+    uint16_t count = 0U;
+
+    if ((buffer == 0) || (max_len == 0U)) {
+        return 0U;
+    }
+
+    while ((count < max_len)
+           && (__HAL_UART_GET_FLAG(&IMU601_UART_HANDLE, UART_FLAG_RXNE) != RESET)) {
+        buffer[count] = (uint8_t)(IMU601_UART_HANDLE.Instance->DR & 0x00FFU);
+        count++;
+    }
+    return count;
+}
