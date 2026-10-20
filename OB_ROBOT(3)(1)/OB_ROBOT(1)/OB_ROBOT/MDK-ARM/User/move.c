@@ -34,10 +34,10 @@
  * 哪个轮子反了，就把对应宏改成 1。
  * 单个轮子的原始方向可用 motor.c 的 Motor_XX_Fwd()/Motor_XX_Rev() 直接验证。
  */
-#define WHEEL_INVERT_LF      0        /* 左前 PC8/PC9   + PA10 */
-#define WHEEL_INVERT_RF      0        /* 右前 PC12/PB5  + PA11 */
-#define WHEEL_INVERT_LR      1        /* 左后 PC2/PC3   + PA8  */
-#define WHEEL_INVERT_RR      1        /* 右后 PC4/PC5   + PB4  */
+#define WHEEL_INVERT_LF      0        /* 左前 PC8/PC9  + PA10 (TIM1_CH3) */
+#define WHEEL_INVERT_RF      0        /* 右前 PC4/PC5  + PB4  (TIM3_CH1) */
+#define WHEEL_INVERT_LR      1        /* 左后 PC2/PC3  + PA8  (TIM1_CH1) */
+#define WHEEL_INVERT_RR      1        /* 右后 PC12/PB5 + PA11 (TIM1_CH4) */
 
 /* ------------------------------------------------------------------------
  * 速度与斜坡参数（单位 0.1 cm/s）
@@ -110,7 +110,7 @@ void Move_Init(void)
     move_settle_ticks = 0U;
 }
 
-/* 立即断 PWM：速度闭环的 Stop() 也会调用这里，所以只做电机层的事 */
+/* 立即断 PWM：先关掉速度闭环，再停电机，避免下一个控制周期被旧目标重新驱动 */
 void Move_Stop(void)
 {
     uint32_t primask = __get_PRIMASK();
@@ -126,6 +126,9 @@ void Move_Stop(void)
     move_duration_ticks = 0U;
     move_elapsed_ticks = 0U;
     move_settle_ticks = 0U;
+
+    /* 闭环也必须一起停：中断已被关掉，Abort 内部的 primask 恢复不会再开中断 */
+    WheelSpeedControl_Abort();
 
     Motor_SetSpeed(MOTOR_LF, 0);
     Motor_SetSpeed(MOTOR_RF, 0);
@@ -151,11 +154,9 @@ void Move_Halt(void)
         __enable_irq();
     }
 
+    /* 闭环本来就没跑：把闭环和电机一起确认停掉，避免残留的旧目标 */
     if (move_running == 0U) {
-        Motor_SetSpeed(MOTOR_LF, 0);
-        Motor_SetSpeed(MOTOR_RF, 0);
-        Motor_SetSpeed(MOTOR_LR, 0);
-        Motor_SetSpeed(MOTOR_RR, 0);
+        Move_Stop();
     }
 }
 
@@ -341,18 +342,7 @@ void Move_Update10ms(void)
         return;
     }
 
-    /* 定时运动到期：目标清零，剩下的交给斜坡减速 */
-    if (move_duration_ticks != 0U) {
-        move_elapsed_ticks++;
-        if (move_elapsed_ticks >= move_duration_ticks) {
-            move_duration_ticks = 0U;
-            move_elapsed_ticks = 0U;
-            move_tgt_x10[0] = 0L;
-            move_tgt_x10[1] = 0L;
-            move_tgt_x10[2] = 0L;
-        }
-    }
-
+    /* ---------- 1) 斜坡推进：每轴按 MOVE_ACCEL_X10_PER_TICK 逼近目标 ---------- */
     vx = Move_RampToward(move_cmd_x10[0], move_tgt_x10[0],
                          MOVE_ACCEL_X10_PER_TICK);
     vy = Move_RampToward(move_cmd_x10[1], move_tgt_x10[1],
@@ -365,22 +355,34 @@ void Move_Update10ms(void)
 
     Move_Mix(vx, vy, wz, wheel);
 
+    /* ---------- 2) 停稳判定：四轮目标都到 0 后维持几周期再关闭环 ---------- */
     stopped = ((wheel[ENCODER_LF] == 0L) && (wheel[ENCODER_RF] == 0L)
             && (wheel[ENCODER_LR] == 0L) && (wheel[ENCODER_RR] == 0L)) ? 1U : 0U;
 
-    /* 目标已经是零且四个轮子都降到零：保持几个周期后关闭闭环 */
     if (stopped != 0U) {
         if (move_settle_ticks < MOVE_SETTLE_TICKS) {
             move_settle_ticks++;
             WheelSpeedControl_SetTargets(0L, 0L, 0L, 0L);
+        } else {
+            move_running = 0U;
+            WheelSpeedControl_Stop();
             return;
         }
-        move_running = 0U;
-        WheelSpeedControl_Stop();
-        return;
+    } else {
+        move_settle_ticks = 0U;
+        WheelSpeedControl_SetTargets(wheel[ENCODER_LF], wheel[ENCODER_RF],
+                                     wheel[ENCODER_LR], wheel[ENCODER_RR]);
     }
 
-    move_settle_ticks = 0U;
-    WheelSpeedControl_SetTargets(wheel[ENCODER_LF], wheel[ENCODER_RF],
-                                 wheel[ENCODER_LR], wheel[ENCODER_RR]);
+    /* ---------- 3) 定时运动到期：本周期已按目标跑过，下周期起减速 ---------- */
+    if (move_duration_ticks != 0U) {
+        move_elapsed_ticks++;
+        if (move_elapsed_ticks >= move_duration_ticks) {
+            move_duration_ticks = 0U;
+            move_elapsed_ticks = 0U;
+            move_tgt_x10[0] = 0L;
+            move_tgt_x10[1] = 0L;
+            move_tgt_x10[2] = 0L;
+        }
+    }
 }

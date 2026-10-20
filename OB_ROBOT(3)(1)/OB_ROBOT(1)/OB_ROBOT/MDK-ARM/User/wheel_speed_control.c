@@ -87,7 +87,8 @@ static void WheelSpeedControl_WriteTargets(int32_t lf_x10, int32_t rf_x10,
                                            int32_t lr_x10, int32_t rr_x10)
 {
     int32_t target[ENCODER_NUM];
-    int32_t sum = 0L;
+    int32_t main_x10 = 0L;
+    int32_t main_magnitude = 0L;
     uint8_t i;
 
     target[ENCODER_LF] = WheelSpeedControl_Limit(
@@ -100,10 +101,22 @@ static void WheelSpeedControl_WriteTargets(int32_t lf_x10, int32_t rf_x10,
         rr_x10, -WHEEL_TARGET_X10_LIMIT, WHEEL_TARGET_X10_LIMIT);
 
     for (i = 0U; i < ENCODER_NUM; i++) {
+        int32_t magnitude;
+
         g_wheel_target_x10[i] = target[i];
-        sum += target[i];
+
+        /*
+         * 主目标取"绝对值最大且保留符号"的那个轮子：
+         * 前进/后退时等于原来的整车目标（波形 ch0 与以前一致），
+         * 横移/旋转时四轮正负相抵，平均值会变成 0，这里仍能反映指令大小。
+         */
+        magnitude = (target[i] >= 0L) ? target[i] : -target[i];
+        if (magnitude > main_magnitude) {
+            main_magnitude = magnitude;
+            main_x10 = target[i];
+        }
     }
-    wheel_target_main_x10 = sum / (int32_t)ENCODER_NUM;
+    wheel_target_main_x10 = main_x10;
 }
 
 static void WheelSpeedControl_ClearState(void)
@@ -159,6 +172,16 @@ void WheelSpeedControl_SetTargets(int32_t lf_x10, int32_t rf_x10,
 
 void WheelSpeedControl_Stop(void)
 {
+    /*
+     * 只调 Move_Stop()：它会顺带调用 WheelSpeedControl_Abort() 关掉闭环，
+     * 再断开四路 PWM。反过来 Stop() 里不能再清一遍状态，
+     * 否则与 Move_Stop() -> Abort() 的调用链重复（且容易写成递归）。
+     */
+    Move_Stop();
+}
+
+void WheelSpeedControl_Abort(void)
+{
     uint32_t primask = __get_PRIMASK();
 
     __disable_irq();
@@ -166,7 +189,6 @@ void WheelSpeedControl_Stop(void)
     wheel_target_main_x10 = 0L;
     WheelSpeedControl_WriteTargets(0L, 0L, 0L, 0L);
     WheelSpeedControl_ClearState();
-    Move_Stop();
     if ((primask & 0x01U) == 0U) {
         __enable_irq();
     }

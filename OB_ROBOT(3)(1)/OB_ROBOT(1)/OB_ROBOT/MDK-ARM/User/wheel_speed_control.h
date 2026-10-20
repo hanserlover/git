@@ -34,9 +34,18 @@ void WheelSpeedControl_SetTargets(int32_t lf_x10, int32_t rf_x10,
                                   int32_t lr_x10, int32_t rr_x10);
 
 void WheelSpeedControl_Stop(void);
+
+/*
+ * 只关闭环、清目标和积分，不碰电机 PWM。
+ * 给 Move_Stop() 用：Move_Stop() 之后中断里的闭环必须真的停下来，
+ * 否则下个 10ms 周期 PI 会按旧目标把电机重新驱动起来。
+ * （不能直接调 WheelSpeedControl_Stop()，那会反过来调用 Move_Stop() 造成递归）
+ */
+void WheelSpeedControl_Abort(void);
+
 uint8_t WheelSpeedControl_IsRunning(void);
 
-/* 四轮目标平均值，串口波形 ch0 用它当“整车目标速度” */
+/* 四轮目标中绝对值最大的那个（带符号），给波形 ch0 当“整车目标速度”用 */
 int32_t WheelSpeedControl_GetTargetX10(void);
 
 /* 指定车轮当前的目标速度 */
