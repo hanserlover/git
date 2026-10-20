@@ -53,6 +53,12 @@ void Move_SetWheelSpeeds(int16_t lf, int16_t rf, int16_t lr, int16_t rr);
 uint8_t Move_IsMoving(void);               /* 1 = 正在闭环运行 */
 void    Move_GetCommand(int32_t *vx_x10, int32_t *vy_x10, int32_t *wz_x10);
 
+/*
+ * 当前"左-右"累计行程偏差，单位 0.01cm（前进时正值 = 左侧走得多）。
+ * 直线纠偏就是把这个值往 0 拉；界面/串口显示它可以直接看出走偏多少。
+ */
+int32_t Move_GetStraightOffsetX100(void);
+
 /* 内部：由 TIM2 10ms 中断在采样之后、闭环之前调用 */
 void Move_Update10ms(void);
 

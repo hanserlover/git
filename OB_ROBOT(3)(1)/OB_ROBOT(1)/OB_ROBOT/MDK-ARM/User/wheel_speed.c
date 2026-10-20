@@ -15,6 +15,7 @@ static int32_t wheel_last_count[ENCODER_NUM] = {0, 0, 0, 0};
 volatile int32_t g_wheel_delta[ENCODER_NUM] = {0, 0, 0, 0};
 volatile int32_t g_wheel_speed_raw_x10[ENCODER_NUM] = {0, 0, 0, 0};
 volatile int32_t g_wheel_speed_x10[ENCODER_NUM] = {0, 0, 0, 0};
+volatile int32_t g_wheel_distance_x100[ENCODER_NUM] = {0, 0, 0, 0};
 volatile uint32_t g_wheel_speed_sample_count = 0U;
 volatile uint32_t g_tick_10ms = 0U;
 
@@ -38,6 +39,7 @@ void WheelSpeed_Reset(void)
         g_wheel_delta[i] = 0;
         g_wheel_speed_raw_x10[i] = 0;
         g_wheel_speed_x10[i] = 0;
+        g_wheel_distance_x100[i] = 0;
     }
     g_wheel_speed_sample_count = 0U;
     if ((primask & 0x01U) == 0U) {
@@ -71,6 +73,12 @@ void WheelSpeed_Update10ms(void)
         g_wheel_speed_raw_x10[i] = raw_x10;
         g_wheel_speed_x10[i] =
             (g_wheel_speed_x10[i] * 4L + raw_x10) / 5L;
+
+        /*
+         * 累计行程：距离(cm) = delta / (PPC_x100/100) = delta*100/PPC_x100，
+         * 这里再乘 100 换成 0.01cm 单位，供直线行程纠偏比较左右侧。
+         */
+        g_wheel_distance_x100[i] += (delta * 10000L) / wheel_ppc_x100[i];
     }
     g_wheel_speed_sample_count++;
 }

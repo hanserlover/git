@@ -98,6 +98,24 @@ static void MotionTest_FormatX10(char *text, int32_t value_x10)
             (unsigned long)(magnitude % 10U));
 }
 
+/* 0.01cm 单位的量（左右行程差）格式化成 +1.2 这种一位小数 */
+static void MotionTest_FormatCm(char *text, int32_t value_x100)
+{
+    uint32_t magnitude;
+    char sign;
+
+    if (value_x100 < 0L) {
+        sign = '-';
+        magnitude = (uint32_t)(-value_x100);
+    } else {
+        sign = '+';
+        magnitude = (uint32_t)value_x100;
+    }
+    sprintf(text, "%c%lu.%lu", sign,
+            (unsigned long)(magnitude / 100U),
+            (unsigned long)((magnitude % 100U) / 10U));
+}
+
 static void MotionTest_Show(void)
 {
     char line[24];
@@ -105,6 +123,7 @@ static void MotionTest_Show(void)
     char rf[10];
     char lr[10];
     char rr[10];
+    char dr[10];
     int32_t speed_lf = g_wheel_speed_x10[ENCODER_LF];
     int32_t speed_rf = g_wheel_speed_x10[ENCODER_RF];
     int32_t speed_lr = g_wheel_speed_x10[ENCODER_LR];
@@ -114,6 +133,7 @@ static void MotionTest_Show(void)
     MotionTest_FormatX10(rf, speed_rf);
     MotionTest_FormatX10(lr, speed_lr);
     MotionTest_FormatX10(rr, speed_rr);
+    MotionTest_FormatCm(dr, Move_GetStraightOffsetX100());
 
     OLED_ClearBuffer();
 
@@ -128,7 +148,13 @@ static void MotionTest_Show(void)
     sprintf(line, "LR:%s RR:%s", lr, rr);
     OLED_ShowString(0, 32, line, OLED_TEXT_SIZE);
 
-    OLED_ShowString(0, 48, "C=STOP HOLD=ROT", OLED_TEXT_SIZE);
+    if (motion_mode == MOTION_MODE_IDLE) {
+        OLED_ShowString(0, 48, "UP/DN F/B L/R SIDE", OLED_TEXT_SIZE);
+    } else {
+        /* D = 左右累计行程差（cm），直线纠偏把它往 0 拉 */
+        sprintf(line, "D:%s C=STOP", dr);
+        OLED_ShowString(0, 48, line, OLED_TEXT_SIZE);
+    }
     OLED_Refresh();
 }
 
