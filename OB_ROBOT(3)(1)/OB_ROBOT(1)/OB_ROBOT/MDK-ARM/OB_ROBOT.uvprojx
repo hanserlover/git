@@ -751,6 +751,16 @@
               <FileType>5</FileType>
               <FilePath>.\User\move.h</FilePath>
             </File>
+            <File>
+              <FileName>motion_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\User\motion_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>motion_test.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\User\motion_test.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

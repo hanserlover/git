@@ -12,6 +12,9 @@ extern volatile int32_t g_wheel_speed_raw_x10[ENCODER_NUM];
 extern volatile int32_t g_wheel_speed_x10[ENCODER_NUM];
 extern volatile uint32_t g_wheel_speed_sample_count;
 
+/* 10ms 节拍，由 TIM2 中断累加；主循环用它做非阻塞调度（不在中断里做 UI/打印） */
+extern volatile uint32_t g_tick_10ms;
+
 void WheelSpeed_Init(void);
 void WheelSpeed_Reset(void);
 void WheelSpeed_Update10ms(void);

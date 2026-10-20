@@ -1,5 +1,6 @@
 #include "wheel_speed.h"
 #include "wheel_speed_control.h"
+#include "move.h"
 
 /* 200 cm、3次闭环行驶标定得到的每厘米脉冲数 x100：LF、RF、LR、RR。 */
 static const int32_t wheel_ppc_x100[ENCODER_NUM] = {
@@ -15,6 +16,7 @@ volatile int32_t g_wheel_delta[ENCODER_NUM] = {0, 0, 0, 0};
 volatile int32_t g_wheel_speed_raw_x10[ENCODER_NUM] = {0, 0, 0, 0};
 volatile int32_t g_wheel_speed_x10[ENCODER_NUM] = {0, 0, 0, 0};
 volatile uint32_t g_wheel_speed_sample_count = 0U;
+volatile uint32_t g_tick_10ms = 0U;
 
 static int32_t WheelSpeed_GetDelta(Encoder_ID id, int32_t now, int32_t last)
 {
@@ -73,10 +75,16 @@ void WheelSpeed_Update10ms(void)
     g_wheel_speed_sample_count++;
 }
 
+/*
+ * TIM2 10ms 中断：只做"采样 → 斜坡/目标 → 闭环"这条控制链，
+ * OLED、按键、串口格式化全部留给主循环，保证中断时间可控。
+ */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == TIM2) {
-        WheelSpeed_Update10ms();
-        WheelSpeedControl_Update10ms();
+        g_tick_10ms++;
+        WheelSpeed_Update10ms();            /* 1. 采样本周期轮速 */
+        Move_Update10ms();                  /* 2. 斜坡推进 + 下发四轮目标 */
+        WheelSpeedControl_Update10ms();     /* 3. PI + 前馈算出 PWM 并下发 */
     }
 }

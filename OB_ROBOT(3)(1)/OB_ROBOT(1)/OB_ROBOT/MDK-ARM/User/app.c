@@ -1,7 +1,7 @@
 #include "app.h"
 #include "main.h"
 #include "tim.h"
-#include "motor.h"
+#include "move.h"
 #include "encoder.h"
 #include "sensor.h"
 #include "key.h"
@@ -9,15 +9,14 @@
 #include "imu601.h"
 #include "wheel_speed.h"
 #include "wheel_speed_control.h"
-#include "speed_control_test.h"
+#include "motion_test.h"
 #include "debug_telemetry.h"
 
-static uint8_t app_last_key = KEY_NONE;
-static uint32_t app_tick_10ms = 0U;
+static uint32_t app_tick_last = 0U;
 
 void App_Init(void)
 {
-    Motor_Init();
+    Move_Init();                 /* 内含 Motor_Init()，同时清掉运动指令状态 */
     Encoder_Init();
     WheelSpeed_Init();
     WheelSpeedControl_Init();
@@ -34,28 +33,24 @@ void App_Init(void)
         Error_Handler();
     }
 
-    SpeedControlTest_Init();
+    app_tick_last = g_tick_10ms;
+    MotionTest_Init();
 }
 
 void App_Run(void)
 {
-    uint32_t now = HAL_GetTick();
+    uint32_t tick = g_tick_10ms;
 
-    if ((now - app_tick_10ms) >= 10U) {
-        uint8_t key;
-
-        app_tick_10ms = now;
-        key = Key_Scan();
-        if (key == KEY_NONE) {
-            app_last_key = KEY_NONE;
-        } else if (app_last_key == KEY_NONE) {
-            app_last_key = key;
-            SpeedControlTest_HandleKey(key);
-        }
-
+    /*
+     * 10ms 节拍由 TIM2 中断累加产生；按键消抖、界面、遥测全部放在主循环，
+     * 中断里只做采样和闭环，符合 AGENTS.md 的约定。
+     */
+    if ((tick - app_tick_last) >= 1U) {
+        app_tick_last = tick;
+        MotionTest_ProcessKey(Key_Scan());
         IMU601_Process();
     }
 
-    SpeedControlTest_Process(now);
-    DebugTelemetry_Process(now);
+    MotionTest_ProcessTick(tick);
+    DebugTelemetry_Process(HAL_GetTick());
 }
