@@ -53,10 +53,10 @@
  * ------------------------------------------------------------------------
  *   P 项：KP_X10 * (误差 - 上次误差) / 10
  *   I 项：KI_X1000 * 误差 / 1000      每个 10ms 周期累加一次
- * 这组 30 / 40 是原直行标定值，先别动；走不直优先查：
- *   a) 摩擦补偿是否合适（起步偏）
- *   b) 左右行程纠偏参数（MOVE_STRAIGHT_* in move.c，慢性偏）
- *   c) 编码器 PPC 标定（wheel_speed.c）
+ * 这组 30 / 40 是原直行标定值，先别动；走不直优先按这个顺序查：
+ *   a) 摩擦补偿是否合适（起步偏）      WHEEL_FF_FRICTION_PWM（本文件）
+ *   b) 角度环增益/死区（慢性偏、蛇行）  HEADING_KP / HEADING_KI（heading.c）
+ *   c) 编码器 PPC 标定（距离对不上）    wheel_ppc_x100（wheel_speed.c）
  */
 #define WHEEL_PI_KP_X10               30L
 #define WHEEL_PI_KI_X1000             40L

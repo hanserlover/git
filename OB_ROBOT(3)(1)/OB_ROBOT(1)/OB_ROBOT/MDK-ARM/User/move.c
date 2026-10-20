@@ -21,6 +21,7 @@
 #include "move.h"
 #include "motor.h"
 #include "encoder.h"
+#include "heading.h"
 #include "wheel_speed.h"
 #include "wheel_speed_control.h"
 
@@ -55,27 +56,18 @@
 #define MOVE_SETTLE_MAX_TICKS       100U    /* 刹车最长等 1s，超时也断输出 */
 
 /* ------------------------------------------------------------------------
- * 直线行程纠偏（专治"四个轮速相等、车身却慢慢跑偏"）
+ * 航向保持（角度环本体在 heading.c，这里只决定"什么时候启用"）
  * ------------------------------------------------------------------------
- * 速度环只能保证每个轮子跟住自己的目标速度，但轮子打滑、麦轮辊子的侧向力、
- * 重心偏置都会让车身一点点偏航，速度环看不见这个偏差（它不测航向）。
- * 这里改用位置量：把左右两侧的累计行程相减，哪边走得多就往回转一点。
- * 这个偏差会随时间累加，所以哪怕稳态差速只有百分之几也能被纠回来。
+ * 纯平移指令（只给 vx、或只给 vy）一开始就锁住当前航向，
+ * 角度环算出的 wz 修正叠加到指令上——前进/后退/左移/右移四个方向
+ * 走的是同一套解算，所以四个方向都能走直线。
+ *   旋转指令（wz != 0）期间必须让路，否则会和人的意图打架。
  *
- *   MOVE_STRAIGHT_ENABLE        1=启用，0=关闭
- *   MOVE_STRAIGHT_KP            每 1cm 左右行程差对应的修正量（0.1cm/s）
- *                               30 => 1cm 差给 0.3cm/s 的旋转修正
- *   MOVE_STRAIGHT_DEADBAND_X100 死区，0.01cm 单位：30 => 0.3cm 以内不修
- *   MOVE_STRAIGHT_WZ_LIMIT_X10  修正量上限（0.1cm/s），防止打滑时猛打方向
- *   MOVE_STRAIGHT_MIN_SPEED_X10 车速太慢时不修正（原地附近没有意义）
- *
- * 只在"纯前进/后退"时生效：横移和旋转时左右行程本来就不相等。
+ *   MOVE_HEADING_HOLD            1=启用航向保持，0=纯开环（对比用）
+ *   MOVE_HEADING_MIN_SPEED_X10   车速低于该值不修正：起步和收尾瞬间不抖
  */
-#define MOVE_STRAIGHT_ENABLE         1
-#define MOVE_STRAIGHT_KP             30L
-#define MOVE_STRAIGHT_DEADBAND_X100  30L
-#define MOVE_STRAIGHT_WZ_LIMIT_X10   30L
-#define MOVE_STRAIGHT_MIN_SPEED_X10  20L
+#define MOVE_HEADING_HOLD            1
+#define MOVE_HEADING_MIN_SPEED_X10   20L
 
 /* ##########################################################################
  * #                          参数区结束                                     #
@@ -119,19 +111,14 @@ static volatile uint32_t move_duration_ticks = 0U;         /* 0 = 不限时 */
 static volatile uint32_t move_elapsed_ticks = 0U;
 static volatile uint8_t  move_settle_ticks = 0U;
 
-/* 直线纠偏：本条指令开始时的"左-右"行程基准（0.01cm），以及当前偏差 */
-#if (MOVE_STRAIGHT_ENABLE != 0)
-static volatile int32_t move_straight_base_x100 = 0L;
-#endif
-static volatile int32_t move_straight_offset_x100 = 0L;
-
-/* 距离闭环：目标距离、起点行程、已经走过的行程（都是 0.01cm） */
+/* 距离闭环：目标距离、指令起点的里程、已经走过的行程（都是 0.01cm） */
 static volatile int32_t move_distance_target_x100 = 0L;
-static volatile int32_t move_distance_base_x100 = 0L;
+static volatile int32_t move_odom_base_vx_x100 = 0L;
+static volatile int32_t move_odom_base_vy_x100 = 0L;
 static volatile int32_t move_travel_x100 = 0L;
 
-/* 前置声明：Move_Stop()/Move_Halt() 里要重置纠偏基准，实现在下面的纠偏小节 */
-static void Move_StraightResetBase(void);
+/* 1 = 本次指令是纯平移，航向保持已启用 */
+static volatile uint8_t move_heading_active = 0U;
 
 /* ===================== 初始化 / 停车 ===================== */
 
@@ -150,7 +137,10 @@ void Move_Init(void)
     move_settle_ticks = 0U;
     move_distance_target_x100 = 0L;
     move_travel_x100 = 0L;
-    Move_StraightResetBase();
+    move_odom_base_vx_x100 = g_odom_vx_x100;
+    move_odom_base_vy_x100 = g_odom_vy_x100;
+    move_heading_active = 0U;
+    Heading_Release();
 }
 
 /* 立即断 PWM：先关掉速度闭环，再停电机，避免下一个控制周期被旧目标重新驱动 */
@@ -170,6 +160,8 @@ void Move_Stop(void)
     move_elapsed_ticks = 0U;
     move_settle_ticks = 0U;
     move_distance_target_x100 = 0L;
+    move_heading_active = 0U;
+    Heading_Release();
 
     /* 闭环也必须一起停：中断已被关掉，Abort 内部的 primask 恢复不会再开中断 */
     WheelSpeedControl_Abort();
@@ -195,6 +187,8 @@ void Move_Halt(void)
     move_duration_ticks = 0U;
     move_elapsed_ticks = 0U;
     move_distance_target_x100 = 0L;   /* 手动停车：取消距离闭环，保留已走行程 */
+    move_heading_active = 0U;         /* 停车过程不再叠加航向修正 */
+    Heading_Release();
     if ((primask & 0x01U) == 0U) {
         __enable_irq();
     }
@@ -246,55 +240,52 @@ static int32_t Move_RampToward(int32_t current, int32_t target, int32_t step)
     return target;
 }
 
-/* ===================== 直线行程纠偏 ===================== */
+/* ===================== 航向 / 里程辅助 ===================== */
 
-#if (MOVE_STRAIGHT_ENABLE != 0)
-
-/* 左右两侧累计行程之差：左 = LF+LR，右 = RF+RR（0.01cm，前进为正） */
-static int32_t Move_SideDistanceDiff(void)
+/**
+ * @brief  沿指令方向的行驶里程（0.01cm，正值 = 按指令方向走了多远）
+ * @note   用里程计的 vx/vy 分量投影，而不是"四轮行程平均"：
+ *         横移时四轮行程两两抵消，平均值恒为 0，只有投影才对。
+ */
+static int32_t Move_TravelAlongCommand(int32_t vx_cmd, int32_t vy_cmd)
 {
-    int32_t left = g_wheel_distance_x100[ENCODER_LF]
-                 + g_wheel_distance_x100[ENCODER_LR];
-    int32_t right = g_wheel_distance_x100[ENCODER_RF]
-                  + g_wheel_distance_x100[ENCODER_RR];
+    int32_t d_vx = g_odom_vx_x100 - move_odom_base_vx_x100;
+    int32_t d_vy = g_odom_vy_x100 - move_odom_base_vy_x100;
 
-    return left - right;
+    if (vx_cmd > 0L) {
+        return d_vx;
+    }
+    if (vx_cmd < 0L) {
+        return -d_vx;
+    }
+    if (vy_cmd > 0L) {
+        return d_vy;
+    }
+    if (vy_cmd < 0L) {
+        return -d_vy;
+    }
+    return 0L;
 }
 
 /**
- * @brief  由左右行程差算出附加的 wz 修正量（0.1cm/s）
- * @note   左边多走 => 车身向右偏 => 需要左旋（wz > 0）把它掰回来。
- *         倒车时两侧累计行程都是负值，差值符号自动反向，
- *         所以前进/后退可以用同一套公式，不用分情况。
+ * @brief  新指令的"起步档案"：记里程起点，并决定要不要锁航向
+ * @note   只有纯平移（没有旋转分量）才启用角度环；
+ *         旋转指令期间让路，否则会跟人的操作打架。
  */
-static int32_t Move_StraightCorrection(void)
+static void Move_StartProfile(int32_t vx_x10, int32_t vy_x10, int32_t wz_x10)
 {
-    int32_t offset = Move_SideDistanceDiff() - move_straight_base_x100;
-    int32_t correction;
+    move_odom_base_vx_x100 = g_odom_vx_x100;
+    move_odom_base_vy_x100 = g_odom_vy_x100;
+    move_travel_x100 = 0L;
 
-    if ((offset <= MOVE_STRAIGHT_DEADBAND_X100)
-        && (offset >= -MOVE_STRAIGHT_DEADBAND_X100)) {
-        return 0L;
+    if ((MOVE_HEADING_HOLD != 0) && (wz_x10 == 0L)
+        && ((vx_x10 != 0L) || (vy_x10 != 0L))) {
+        Heading_Hold();
+        move_heading_active = 1U;
+    } else {
+        Heading_Release();
+        move_heading_active = 0U;
     }
-
-    correction = (offset * MOVE_STRAIGHT_KP) / 1000L;
-    if (correction > MOVE_STRAIGHT_WZ_LIMIT_X10) {
-        correction = MOVE_STRAIGHT_WZ_LIMIT_X10;
-    } else if (correction < -MOVE_STRAIGHT_WZ_LIMIT_X10) {
-        correction = -MOVE_STRAIGHT_WZ_LIMIT_X10;
-    }
-    return correction;
-}
-
-#endif /* MOVE_STRAIGHT_ENABLE */
-
-/* 记录本周期的行程基准/偏差，同时把"新指令从零开始"这件事做掉 */
-static void Move_StraightResetBase(void)
-{
-    move_straight_offset_x100 = 0L;
-#if (MOVE_STRAIGHT_ENABLE != 0)
-    move_straight_base_x100 = Move_SideDistanceDiff();
-#endif
 }
 
 /* ===================== 指令下发 ===================== */
@@ -321,9 +312,7 @@ static void Move_StartCommand(int32_t vx_x10, int32_t vy_x10, int32_t wz_x10,
     move_elapsed_ticks = 0U;
     move_settle_ticks = 0U;
     move_distance_target_x100 = 0L;      /* 普通指令不带距离闭环 */
-    move_distance_base_x100 = WheelSpeed_GetAverageDistanceX100();
-    move_travel_x100 = 0L;
-    Move_StraightResetBase();      /* 新指令：左右行程差从当前点重新算 */
+    Move_StartProfile(vx_x10, vy_x10, wz_x10);
     move_duration_ticks = 0U;
     if (duration_ms != 0U) {
         /* 少于一个控制周期也按 1 个周期算，避免"定时"变成"不限时" */
@@ -358,25 +347,28 @@ void Move_DriveFor(int32_t vx_x10, int32_t vy_x10, int32_t wz_x10,
 }
 
 /**
- * @brief  距离闭环：走满 distance_x100（0.01cm）后自动减速停车
- * @note   距离按四轮累计行程的平均值算，并在停车判据里预扣掉
- *         "从当前速度减到 0 还要滑行的距离"，所以 1m 就是 1m，
- *         不会冲到 1m 才开始减速。
+ * @brief  距离闭环：沿指令方向走满 distance_x100（0.01cm）后自动减速停车
+ * @note   行程取"指令方向上的里程投影"，所以横移也能用；
+ *         停车判据里预扣掉"从当前速度减到 0 还要滑行的距离"，
+ *         所以 1m 就是 1m，不会冲到 1m 才开始减速。
  *         安全超时取预计耗时的 3 倍再加 1s（上限 60s），
  *         轮子被卡住时不会无限转下去。
  */
-void Move_DriveDistance(int32_t vx_x10, int32_t distance_x100)
+void Move_DriveDistance(int32_t vx_x10, int32_t vy_x10, int32_t distance_x100)
 {
-    int32_t speed = Move_ClampSpeed(vx_x10);
+    int32_t speed;
     uint32_t safety_ms;
     uint32_t primask;
 
-    if ((speed == 0L) || (distance_x100 <= 0L)) {
+    if ((distance_x100 <= 0L) || ((vx_x10 == 0L) && (vy_x10 == 0L))) {
         /* 参数不合法就退化成普通速度指令，至少不会原地不动 */
-        Move_StartCommand(vx_x10, 0L, 0L, 0U);
+        Move_StartCommand(vx_x10, vy_x10, 0L, 0U);
         return;
     }
 
+    /* 单个轴的指令速度就代表整车速度（四个方向都是纯单轴指令） */
+    speed = (vx_x10 != 0L) ? vx_x10 : vy_x10;
+    speed = Move_ClampSpeed(speed);
     if (speed < 0L) {
         speed = -speed;
     }
@@ -390,11 +382,11 @@ void Move_DriveDistance(int32_t vx_x10, int32_t distance_x100)
         safety_ms = 60000U;
     }
 
-    Move_StartCommand(vx_x10, 0L, 0L, safety_ms);
+    Move_StartCommand(vx_x10, vy_x10, 0L, safety_ms);
 
+    /* 里程起点已由 Move_StartCommand -> Move_StartProfile() 记录 */
     primask = __get_PRIMASK();
     __disable_irq();
-    move_distance_base_x100 = WheelSpeed_GetAverageDistanceX100();
     move_distance_target_x100 = distance_x100;
     move_travel_x100 = 0L;
     if ((primask & 0x01U) == 0U) {
@@ -478,12 +470,6 @@ void Move_GetCommand(int32_t *vx_x10, int32_t *vy_x10, int32_t *wz_x10)
     }
 }
 
-/* 当前"左-右"累计行程偏差（0.01cm），给界面/调试看走偏了多少 */
-int32_t Move_GetStraightOffsetX100(void)
-{
-    return move_straight_offset_x100;
-}
-
 /* ===================== 10ms 斜坡 + 目标下发 ===================== */
 
 void Move_Update10ms(void)
@@ -512,12 +498,11 @@ void Move_Update10ms(void)
 
     /* ---------- 2) 距离闭环：接近目标距离就收油，剩余路程交给斜坡 ---------- */
     if (move_distance_target_x100 > 0L) {
-        int32_t traveled = WheelSpeed_GetAverageDistanceX100()
-                         - move_distance_base_x100;
+        int32_t traveled = Move_TravelAlongCommand(vx, vy);
         int32_t lead;
 
         if (traveled < 0L) {
-            traveled = -traveled;       /* 后退时行程为负，取绝对值 */
+            traveled = -traveled;       /* 指令与里程方向相反时取绝对值 */
         }
         move_travel_x100 = traveled;
 
@@ -532,21 +517,20 @@ void Move_Update10ms(void)
     }
 
     /*
-     * ---------- 3) 直线行程纠偏 ----------
-     * 只在纯前进/后退时叠加旋转修正：横移时左右行程本来就不相等，
-     * 车太慢时也不修（0 附近没有意义，反而容易抖）。
+     * ---------- 3) 航向保持（角度环） ----------
+     * 纯平移期间把角度环的 wz 修正叠加到指令上：车身一旦转偏，
+     * 修正量就把四个轮子的目标速度按"反向旋转"重新分配，把它掰回来。
+     * 四个方向都用同一条通路，所以前进/后退/左移/右移都能走直线。
      */
     wz_out = wz;
-#if (MOVE_STRAIGHT_ENABLE != 0)
-    if ((vy == 0L) && (wz == 0L)
-        && ((vx >= MOVE_STRAIGHT_MIN_SPEED_X10)
-            || (vx <= -MOVE_STRAIGHT_MIN_SPEED_X10))) {
-        move_straight_offset_x100 =
-            Move_SideDistanceDiff() - move_straight_base_x100;
-        wz_out = wz + Move_StraightCorrection();
+    if (move_heading_active != 0U) {
+        int32_t min_speed = MOVE_HEADING_MIN_SPEED_X10;
+
+        if (((vx >= min_speed) || (vx <= -min_speed))
+            || ((vy >= min_speed) || (vy <= -min_speed))) {
+            wz_out = wz + Heading_GetCorrectionX10();
+        }
     }
-    /* 横移/旋转/低速段不修正，但保留上一次的偏差值，方便停下来回看 */
-#endif
 
     Move_Mix(vx, vy, wz_out, wheel);
 

@@ -746,6 +746,16 @@
               <FilePath>.\User\move.h</FilePath>
             </File>
             <File>
+              <FileName>heading.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\User\heading.c</FilePath>
+            </File>
+            <File>
+              <FileName>heading.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\User\heading.h</FilePath>
+            </File>
+            <File>
               <FileName>motion_test.c</FileName>
               <FileType>1</FileType>
               <FilePath>.\User\motion_test.c</FilePath>

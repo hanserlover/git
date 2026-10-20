@@ -7,6 +7,7 @@
 #include "key.h"
 #include "oled.h"
 #include "imu601.h"
+#include "heading.h"
 #include "wheel_speed.h"
 #include "wheel_speed_control.h"
 #include "motion_test.h"
@@ -19,6 +20,7 @@ void App_Init(void)
     Move_Init();                 /* 内含 Motor_Init()，同时清掉运动指令状态 */
     Encoder_Init();
     WheelSpeed_Init();
+    Heading_Init();              /* 里程计清零 + 角度环待命 */
     WheelSpeedControl_Init();
     Sensor_Init();
     Key_Init();
