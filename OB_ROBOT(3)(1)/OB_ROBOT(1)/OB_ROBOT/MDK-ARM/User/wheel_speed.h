@@ -1,0 +1,19 @@
+#ifndef __WHEEL_SPEED_H
+#define __WHEEL_SPEED_H
+
+#include "encoder.h"
+
+/*
+ * 四轮顺序沿用 Encoder_ID：LF、RF、LR、RR。
+ * 速度单位为 0.1 cm/s，正数表示车轮物理前进。
+ */
+extern volatile int32_t g_wheel_delta[ENCODER_NUM];
+extern volatile int32_t g_wheel_speed_raw_x10[ENCODER_NUM];
+extern volatile int32_t g_wheel_speed_x10[ENCODER_NUM];
+extern volatile uint32_t g_wheel_speed_sample_count;
+
+void WheelSpeed_Init(void);
+void WheelSpeed_Reset(void);
+void WheelSpeed_Update10ms(void);
+
+#endif
