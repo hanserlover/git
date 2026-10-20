@@ -46,11 +46,13 @@
  * MOVE_SPEED_X10_MAX       单轮目标上限，闭环输出限幅 1500 PWM 约对应 30cm/s
  * MOVE_ACCEL_X10_PER_TICK  每 10ms 允许变化的速度量：8 => 80 cm/s²
  *                          10cm/s 大约 13 个控制周期（130ms）加到满
- * MOVE_SETTLE_TICKS        停稳后继续保持零目标的时间，之后关闭闭环
+ * MOVE_STOP_SPEED_X10      轮速低于 0.2cm/s 就认为这一轮已经停住
+ * MOVE_SETTLE_MAX_TICKS    停车时闭环最多再刹车 1s，超时也强制断输出
  */
 #define MOVE_SPEED_X10_MAX          250L
 #define MOVE_ACCEL_X10_PER_TICK     8L
-#define MOVE_SETTLE_TICKS           10U
+#define MOVE_STOP_SPEED_X10         2L      /* 轮速低于 0.2cm/s 认为已停 */
+#define MOVE_SETTLE_MAX_TICKS       100U    /* 刹车最长等 1s，超时也断输出 */
 
 /* ------------------------------------------------------------------------
  * 直线行程纠偏（专治"四个轮速相等、车身却慢慢跑偏"）
@@ -468,26 +470,42 @@ void Move_Update10ms(void)
 
     Move_Mix(vx, vy, wz_out, wheel);
 
-    /* ---------- 2) 停稳判定：四轮目标都到 0 后维持几周期再关闭环 ---------- */
+    /* ---------- 3) 停稳判定：四轮目标都为 0 后继续闭环刹车，停住再关 ---------- */
     stopped = ((wheel[ENCODER_LF] == 0L) && (wheel[ENCODER_RF] == 0L)
             && (wheel[ENCODER_LR] == 0L) && (wheel[ENCODER_RR] == 0L)) ? 1U : 0U;
 
     if (stopped != 0U) {
-        if (move_settle_ticks < MOVE_SETTLE_TICKS) {
-            move_settle_ticks++;
-            WheelSpeedControl_SetTargets(0L, 0L, 0L, 0L);
-        } else {
+        /*
+         * 目标已经归零：继续让闭环做阻尼刹车，直到四轮实测速度都停下来
+         * （或超时），再断 PWM。固定等 N 个周期就松手会"溜"一段。
+         */
+        uint8_t all_halted = 1U;
+        uint8_t k;
+
+        for (k = 0U; k < ENCODER_NUM; k++) {
+            int32_t speed = g_wheel_speed_x10[k];
+
+            if ((speed > MOVE_STOP_SPEED_X10) || (speed < -MOVE_STOP_SPEED_X10)) {
+                all_halted = 0U;
+            }
+        }
+
+        if ((all_halted != 0U)
+            || (move_settle_ticks >= (uint8_t)MOVE_SETTLE_MAX_TICKS)) {
             move_running = 0U;
             WheelSpeedControl_Stop();
             return;
         }
+
+        move_settle_ticks++;
+        WheelSpeedControl_SetTargets(0L, 0L, 0L, 0L);
     } else {
         move_settle_ticks = 0U;
         WheelSpeedControl_SetTargets(wheel[ENCODER_LF], wheel[ENCODER_RF],
                                      wheel[ENCODER_LR], wheel[ENCODER_RR]);
     }
 
-    /* ---------- 3) 定时运动到期：本周期已按目标跑过，下周期起减速 ---------- */
+    /* ---------- 4) 定时运动到期：本周期已按目标跑过，下周期起减速 ---------- */
     if (move_duration_ticks != 0U) {
         move_elapsed_ticks++;
         if (move_elapsed_ticks >= move_duration_ticks) {
